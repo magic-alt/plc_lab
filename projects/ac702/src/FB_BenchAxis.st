@@ -12,7 +12,7 @@ VAR_INPUT
     lrDeceleration : LREAL;
     lrJerk : LREAL;
     xTorqueEnable : BOOL;
-    lrTorqueNm : LREAL;
+    lrTorquePct : LREAL;
 END_VAR
 VAR_OUTPUT
     xPowerReady : BOOL;
@@ -21,7 +21,7 @@ VAR_OUTPUT
     xError : BOOL;
     lrActualPosition : LREAL;
     lrTrackingError : LREAL;
-    lrActualTorqueNm : LREAL;
+    lrActualTorquePct : LREAL;
 END_VAR
 VAR
     fbPower : MC_Power;
@@ -32,14 +32,17 @@ VAR
     fbTrackingError : SMC_GetTrackingError;
     fbReadTorque : MC_ReadActualTorque;
     rtMove : R_TRIG;
+    rtTorqueEnable : R_TRIG;
 
     eRequestedControllerMode : SMC_CONTROLLER_MODE := SMC_position;
     xMoveActive : BOOL;
-    xTorqueActive : BOOL;
+    xTorqueWritePulse : BOOL;
     xMoveDoneLatched : BOOL := FALSE;
+    xTorqueCommanded : BOOL := FALSE;
+    lrLastTorquePct : LREAL := 0.0;
 END_VAR
 
-// Power-stage control follows the standard SoftMotion MC_Power interface.
+// Power-stage control follows the SoftMotion MC_Power interface.
 fbPower(
     Axis := Axis,
     Enable := TRUE,
@@ -54,7 +57,7 @@ ELSE
     eRequestedControllerMode := SMC_position;
 END_IF
 
-// The required setpoint FB must take over immediately after the mode switch.
+// Switch the controller mode before issuing the setpoint command.
 fbSetMode(
     Axis := Axis,
     bExecute := xEnablePower,
@@ -84,13 +87,26 @@ IF fbMoveAbsolute.Done THEN
     xMoveDoneLatched := TRUE;
 END_IF
 
-// SMC_SetTorque expects Nm (or N for a linear axis), not percentage.
-// The caller converts the requested percentage using actual motor rated torque.
-xTorqueActive := xEnablePower AND xModeReady AND (eMode = E_BenchMode.CST) AND xTorqueEnable;
+// IMPORTANT: use the Inovance target semantics, not the generic upstream
+// CODESYS documentation. The AC700/medium-PLC application guide specifies
+// SMC_SetTorque.fTorque in 0.1% rated-torque units and bEnable as a rising-edge
+// command. A 2.0% request therefore becomes fTorque=20.0.
+rtTorqueEnable(CLK := xTorqueEnable);
+xTorqueWritePulse := FALSE;
+IF xEnablePower AND xModeReady AND (eMode = E_BenchMode.CST) AND xTorqueEnable THEN
+    IF rtTorqueEnable.Q OR (NOT xTorqueCommanded) OR (ABS(lrTorquePct - lrLastTorquePct) > 0.0001) THEN
+        xTorqueWritePulse := TRUE;
+        lrLastTorquePct := lrTorquePct;
+        xTorqueCommanded := TRUE;
+    END_IF
+ELSE
+    xTorqueCommanded := FALSE;
+END_IF
+
 fbSetTorque(
     Axis := Axis,
-    bEnable := xTorqueActive,
-    fTorque := SEL(xTorqueActive, 0.0, lrTorqueNm)
+    bEnable := xTorqueWritePulse,
+    fTorque := lrTorquePct * 10.0
 );
 
 fbReadPosition(Axis := Axis, Enable := TRUE);
@@ -104,13 +120,14 @@ IF fbTrackingError.bValid THEN
     lrTrackingError := fbTrackingError.fActTrackingError;
 END_IF
 IF fbReadTorque.Valid THEN
-    lrActualTorqueNm := fbReadTorque.Torque;
+    // Verify the AC702 target's displayed/scaled unit against 0x6077 during
+    // commissioning. The benchmark CSV stores the normalized value as percent.
+    lrActualTorquePct := fbReadTorque.Torque;
 END_IF
 
 IF eMode = E_BenchMode.CSP THEN
     xCommandDone := xMoveDoneLatched;
 ELSE
-    // CST is a continuous command; mode-ready means the cyclic setpoint path is active.
     xCommandDone := xModeReady AND NOT fbSetTorque.bError;
 END_IF
 
