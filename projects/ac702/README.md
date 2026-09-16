@@ -1,56 +1,70 @@
 # Inovance AC702 benchmark project
 
-This directory contains importable IEC 61131-3 Structured Text source for the AC702/InoProShop side of the benchmark.
+This directory contains importable IEC 61131-3 Structured Text for the AC702/InoProShop side of the common 16-axis benchmark.
 
 ## Vendor/runtime assumptions
 
-- InoProShop (CODESYS based), AC700 target package installed.
-- 16 EtherCAT axes configured from the same SV680N ESI used for the ZMC test.
-- EtherCAT Distributed Clocks enabled and axis PDOs kept identical between controllers where the vendor stacks allow it.
-- AC702's documented multi-axis synchronization point is 1 ms. 500/250/125 us configurations are **stress experiments**, not claimed supported operating points.
+- InoProShop (CODESYS based) with the matching AC700 target package installed.
+- 16 EtherCAT axes configured from the same SV680N ESI revision used for the ZMC test.
+- Distributed Clocks enabled and PDOs kept equivalent between controllers where the two stacks permit it.
+- AC702's published multi-axis synchronization point is 1 ms. The 500/250/125 us rows are **stress experiments**, not claimed supported operating points.
 
 ## Import / configure
 
 1. Create an AC702 project in InoProShop.
 2. Scan/import all 16 SV680N slaves under the EtherCAT master.
-3. Configure DC and the cyclic task.
-4. Import the ST objects under `src/`.
-5. Edit `AxisBindings.st` so `Axis_00..Axis_15` match the generated InoProShop axis object names.
-6. Add the `SysTimeCore` library. The instrumentation uses `SysTimeGetUs` for task-period/jitter measurement.
-7. Map PDOs needed by the selected mode.
+3. Configure DC and the high-priority cyclic motion task.
+4. Import `Types.st`, `GVL_Benchmark.st`, `FB_BenchAxis.st`, and `PRG_Benchmark.st`.
+5. Name the generated axis objects `Axis_00` ... `Axis_15`, or edit the 16 bindings in `PRG_Benchmark.st`.
+6. Add/resolve the `SysTimeCore`/`SysTime` library used by `SysTimeGetUs`.
+7. Map the PDOs needed by the selected mode.
+8. Build with `g_xArmPower=FALSE` and `g_xArmCST=FALSE` first.
 
 ### CSP PDO minimum
 
-Keep the standard CiA 402 CSP objects required by the InoProShop axis mapping, including control/status word, modes of operation/display, target/actual position and any following-error signal used by your axis object.
+Keep the standard CiA 402 CSP objects required by InoProShop axis mapping: control/status word, mode of operation/display, target/actual position, plus the drive feedback used for following-error diagnostics.
 
-### CST PDO minimum
+### CST PDO minimum and scaling
 
-Inovance's AC700 torque-mode application guide requires synchronous torque mode and specifically calls out target torque `0x6071`; `MC_TorqueControl` also requires maximum profile velocity `0x607F`. The official guide shows `SMC_SetControllerMode` followed by `SMC_SetTorque` or `MC_TorqueControl`.
+The Inovance AC700/medium-PLC torque-mode guide requires synchronous torque mode and calls out target torque `0x6071`; `MC_TorqueControl` additionally requires maximum profile velocity `0x607F`.
+
+The checked-in implementation uses:
+
+```text
+SMC_SetControllerMode(SMC_torque)
+        -> SMC_SetTorque
+```
+
+**Important target-specific difference:** the Inovance guide defines `SMC_SetTorque.fTorque` in **0.1% rated-torque units**. `GVL_Benchmark.g_lrCstCommandPct` is exposed in ordinary percent; `FB_BenchAxis` converts it with `fTorque = percent * 10`. Thus 2.0% becomes `20.0` at `SMC_SetTorque`.
+
+The upstream generic CODESYS help describes a different physical-unit convention; for AC702 this project follows the Inovance target documentation. Verify the actual-torque display/scaling against drive object `0x6077` and the InoProShop commissioning view before using `actual_torque_pct` in a report.
 
 ## Task configuration
 
-Create one high-priority cyclic motion task and attach `PRG_Benchmark` to it.
+Create one high-priority cyclic task and attach `PRG_Benchmark` to it. Its interval must equal `g_udiRequestedCycleUs`.
 
-Run separate projects/configurations at:
+Run separate configurations at:
 
-- 1000 us — documented baseline
-- 500 us — stress
-- 250 us — stress
-- 125 us — stress
+- 1000 us — documented baseline;
+- 500 us — stress;
+- 250 us — stress;
+- 125 us — stress.
 
-Do not silently accept a configured period as a valid result. Save InoProShop task statistics and EtherCAT DC statistics for every run.
+A configured interval is not a successful measurement by itself. Save task statistics and EtherCAT diagnostics for every run.
 
 ## Measurement sources
 
 - `SysTimeGetUs`: application-observed task period and jitter.
 - InoProShop Task Configuration/Monitoring: task execution time and jitter.
-- EtherCAT Master -> DC Statistics: DC deviation histogram.
-- EtherCAT Master -> Status/Overview: LostFrameCount, TxErrorCount, RxErrorCount and slave CRC/error counters.
-- EtherCAT master IEC object / `LastError`: detect `WRONG_WORKING_COUNTER`.
-- AC702 front display/runtime monitor: CPU load.
+- EtherCAT Master -> DC Statistics: DC deviation distribution.
+- EtherCAT Master status/overview: lost-frame and link/error counters.
+- EtherCAT master IEC diagnostics / `LastError`: wrong-working-counter conditions.
+- SoftMotion `MC_ReadActualPosition`, `SMC_GetTrackingError`, `MC_ReadActualTorque`: motion feedback.
+- AC702 display/runtime monitor: CPU load.
+- `pdo_latency_us`: only from an explicit PDO loopback / timestamp fixture; leave blank otherwise.
 
-The ST logger deliberately does not invent a WKC or CPU-load value. If your installed target exposes these as IEC variables, bind them in `PRG_Benchmark` and export them; otherwise use the runtime diagnostic export and merge the fields during analysis.
+The ST project intentionally does not fabricate WKC, DC, PDO-latency or CPU values. Bind a real runtime diagnostic if available; otherwise merge the exported runtime diagnostics into the common CSV offline.
 
 ## Safety
 
-`g_xArmPower` and `g_xArmCST` default to `FALSE`. Keep drive-side torque/velocity limits active. Never enable the checked-in CST sequence on a free-spinning joint or unrestrained motor.
+`g_xArmPower` and `g_xArmCST` default to `FALSE`, and `g_lrCstCommandPct` defaults to `0.0`. Keep drive torque/velocity limits and STO/emergency stop active. Never enable CST on an unrestrained motor or joint.
