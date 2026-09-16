@@ -11,7 +11,7 @@ The first suite compares **ZMotion ZMC432-16-V2** and **Inovance AC702** with th
 | ZMC432-16-V2 | both | baseline | stress | stress | stress |
 | AC702 | both | documented baseline | stress | stress | stress |
 
-`UNSUPPORTED` is a valid laboratory result. A controller is not marked failed merely because a stress period is outside its documented operating point.
+`UNSUPPORTED` is a valid laboratory result. A controller is not marked failed merely because a stress period is outside its documented operating point. A run that does not capture all six core comparison dimensions (task jitter, DC deviation, WKC, explicit PDO latency, following error and CPU load) is reported as `INCOMPLETE`, never silently promoted to `PASS`.
 
 ## Repository layout
 
@@ -22,6 +22,7 @@ common/
 
 docs/
   benchmark-spec.md         Test protocol, gates and fairness rules
+  hardware-validation.md    Staged 1-axis -> 16-axis -> CSP/CST qualification checklist
   references.md             Vendor/manual references used by the implementation
 
 projects/
@@ -35,7 +36,7 @@ projects/
     src/PRG_Benchmark.st    InoProShop/CODESYS SoftMotion project
 
 tools/
-  analyze_results.py        Cross-controller statistics and PASS/FAIL/UNSUPPORTED report
+  analyze_results.py        Cross-controller statistics and status report
 
 tests/
   test_analyze_results.py   Analyzer regression tests
@@ -46,9 +47,9 @@ tests/
 - active/measured cycle period;
 - application task jitter;
 - EtherCAT DC deviation;
-- WKC correctness where the runtime exposes it;
+- WKC correctness;
 - lost frames / link errors;
-- explicit PDO loopback latency where a loopback fixture exists;
+- explicit PDO loopback latency;
 - following error;
 - command/actual torque;
 - CPU load;
@@ -79,6 +80,8 @@ Missing hardware diagnostics remain empty. Following error is **not** used as PD
 
 The AC702 project follows the Inovance target definition of `SMC_SetTorque.fTorque`: **0.1% of rated torque per unit**. The operator-facing benchmark variable is ordinary percent and is converted internally.
 
+Before energized testing, follow `docs/hardware-validation.md`; it deliberately starts at one axis / 1 ms / zero command before expanding to 16-axis CSP/CST and sub-1-ms stress periods.
+
 ## Analyze exported data
 
 Transform vendor exports into `common/result_template.csv`, preserving empty fields for unavailable metrics, then run:
@@ -99,7 +102,7 @@ JSON output:
 python tools/analyze_results.py results/*.csv --json
 ```
 
-The analyzer reports p99/max jitter, DC deviation, PDO latency, following error, CPU load, WKC/loss failures, missing metrics and final `PASS` / `FAIL` / `UNSUPPORTED` status.
+The analyzer reports p99/max jitter, DC deviation, PDO latency, following error, CPU load, WKC/loss failures, missing metrics and final `PASS` / `FAIL` / `INCOMPLETE` / `UNSUPPORTED` / `ABORTED` status.
 
 ## Development checks
 
