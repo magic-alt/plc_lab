@@ -26,7 +26,8 @@ STRUCT
     uliTimestampUs : ULINT;
     lrTaskDeltaUs : LREAL;
     lrJitterUs : LREAL;
-    lrDcDeviationNs : LREAL;   // bind from runtime diagnostic if available, otherwise NaN/sentinel
+    lrDcDeviationNs : LREAL;   // optional runtime diagnostic binding
+    lrPdoLatencyUs : LREAL;    // optional explicit PDO loopback/hardware-timestamp measurement
     diWkcExpected : DINT;      // runtime-specific optional binding
     diWkcActual : DINT;        // runtime-specific optional binding
     xWkcOk : BOOL;
