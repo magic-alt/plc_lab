@@ -2,7 +2,8 @@
 """Summarize plc_lab EtherCAT benchmark CSV exports.
 
 Missing measurements stay missing: DC deviation, WKC, PDO latency and CPU load
-are never inferred from unrelated signals.
+are never inferred from unrelated signals. A capture missing any of the six core
+benchmark dimensions is INCOMPLETE rather than silently passing.
 """
 from __future__ import annotations
 
@@ -16,6 +17,14 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 GROUP_KEYS = ("controller", "mode", "requested_cycle_us")
+CORE_METRICS = (
+    "task_jitter",
+    "dc_deviation",
+    "wkc",
+    "pdo_latency",
+    "following_error",
+    "cpu_load",
+)
 
 
 def _float(value: object) -> float | None:
@@ -135,6 +144,18 @@ def summarize_group(
     following_stats = _summary_stats(following)
     cpu_stats = _summary_stats(cpu)
 
+    missing_metrics: list[str] = []
+    for name, values in (
+        ("task_jitter", jitter),
+        ("dc_deviation", dc),
+        ("wkc", wkc_present),
+        ("pdo_latency", pdo),
+        ("following_error", following),
+        ("cpu_load", cpu),
+    ):
+        if not values:
+            missing_metrics.append(name)
+
     reasons: list[str] = []
     measured_cycle = actual_stats["median"]
     if measured_cycle is not None and abs(float(measured_cycle) - requested) > max(2.0, requested * 0.05):
@@ -162,20 +183,10 @@ def summarize_group(
         status = "ABORTED"
     elif reasons:
         status = "FAIL"
+    elif missing_metrics:
+        status = "INCOMPLETE"
     else:
         status = "PASS"
-
-    missing_metrics = []
-    for name, values in (
-        ("task_jitter", jitter),
-        ("dc_deviation", dc),
-        ("wkc", wkc_present),
-        ("pdo_latency", pdo),
-        ("following_error", following),
-        ("cpu_load", cpu),
-    ):
-        if not values:
-            missing_metrics.append(name)
 
     return {
         "controller": rows[0].get("controller", ""),
@@ -248,6 +259,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         for item in summaries:
             for reason in item["reasons"]:
                 print(f"- {item['controller']} {item['mode']} {item['requested_cycle_us']} us: {reason}")
+            if item["status"] == "INCOMPLETE":
+                print(
+                    f"- {item['controller']} {item['mode']} {item['requested_cycle_us']} us: "
+                    f"missing required metrics: {', '.join(item['missing_metrics'])}"
+                )
     return 0
 
 
