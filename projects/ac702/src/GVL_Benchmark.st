@@ -13,14 +13,13 @@ VAR_GLOBAL
 
     // Run configuration. The task interval in InoProShop must match this value.
     g_eMode : E_BenchMode := E_BenchMode.CSP;
-    g_udiRequestedCycleUs : UDINT := gc_udiDefaultCycleUs;
+    g_udiRequestedCycleUs : UDINT := 1000;
     g_lrPositionAmplitude : LREAL := 5.0;       // axis engineering units, normally deg at output-equivalent scaling
     g_lrVelocity : LREAL := 20.0;              // engineering units/s
     g_lrAcceleration : LREAL := 200.0;         // engineering units/s^2
     g_lrDeceleration : LREAL := 200.0;
     g_lrJerk : LREAL := 0.0;
-    g_lrRatedMotorTorqueNm : LREAL := 1.0;      // MUST be set to actual motor rated torque before CST
-    g_lrCstCommandPct : LREAL := 0.0;           // checked-in safe value; recommended first loaded run <= 2%
+    g_lrCstCommandPct : LREAL := 0.0;           // percent rated torque; checked-in safe value, first loaded run <= 2%
     g_uiCycles : UINT := 20;
 
     // State/status exported to Trace / watch / CSV.
@@ -55,8 +54,8 @@ VAR_GLOBAL
     g_alrTargetPosition : ARRAY[0..15] OF LREAL;
     g_alrActualPosition : ARRAY[0..15] OF LREAL;
     g_alrTrackingError : ARRAY[0..15] OF LREAL;
-    g_alrCommandTorqueNm : ARRAY[0..15] OF LREAL;
-    g_alrActualTorqueNm : ARRAY[0..15] OF LREAL;
+    g_alrCommandTorquePct : ARRAY[0..15] OF LREAL;
+    g_alrActualTorquePct : ARRAY[0..15] OF LREAL;
     g_axAxisPowerReady : ARRAY[0..15] OF BOOL;
     g_axAxisModeReady : ARRAY[0..15] OF BOOL;
     g_axAxisCommandDone : ARRAY[0..15] OF BOOL;
