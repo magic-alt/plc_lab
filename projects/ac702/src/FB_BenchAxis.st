@@ -35,6 +35,8 @@ VAR
     rtTorqueEnable : R_TRIG;
 
     eRequestedControllerMode : SMC_CONTROLLER_MODE := SMC_position;
+    eLastConfirmedMode : SMC_CONTROLLER_MODE := SMC_position;
+    xModeDoneLatched : BOOL := FALSE;
     xMoveActive : BOOL;
     xTorqueWritePulse : BOOL;
     xMoveDoneLatched : BOOL := FALSE;
@@ -57,13 +59,25 @@ ELSE
     eRequestedControllerMode := SMC_position;
 END_IF
 
-// Switch the controller mode before issuing the setpoint command.
+// SMC_SetControllerMode is started on the power-enable rising edge. Once the
+// drive confirms the mode, latch that state so the benchmark does not depend on
+// the exact duration of bDone. Every benchmark run begins from power disabled.
+IF NOT xEnablePower THEN
+    xModeDoneLatched := FALSE;
+ELSIF eRequestedControllerMode <> eLastConfirmedMode THEN
+    xModeDoneLatched := FALSE;
+END_IF
+
 fbSetMode(
     Axis := Axis,
     bExecute := xEnablePower,
     nControllerMode := eRequestedControllerMode
 );
-xModeReady := fbSetMode.bDone;
+IF fbSetMode.bDone THEN
+    xModeDoneLatched := TRUE;
+    eLastConfirmedMode := eRequestedControllerMode;
+END_IF
+xModeReady := xModeDoneLatched;
 
 // xMoveExecute is a one-task-cycle trigger. Latch completion so all 16 axes do
 // not have to assert MC_MoveAbsolute.Done in the exact same PLC scan.
