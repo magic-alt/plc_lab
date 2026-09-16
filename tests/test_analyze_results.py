@@ -44,6 +44,23 @@ class AnalyzeResultsTests(unittest.TestCase):
         self.assertEqual(summary["bad_wkc_samples"], 0)
         self.assertEqual(summary["missing_metrics"], [])
 
+    def test_missing_required_metrics_are_incomplete(self):
+        rows = [{
+            "controller": "zmc432-16-v2",
+            "mode": "CSP",
+            "requested_cycle_us": "1000",
+            "actual_cycle_us": "1000",
+            "task_delta_us": "1002",
+            "jitter_us": "2",
+            "following_error": "0.01",
+        }]
+        summary = summarize_group(rows)
+        self.assertEqual(summary["status"], "INCOMPLETE")
+        self.assertIn("dc_deviation", summary["missing_metrics"])
+        self.assertIn("wkc", summary["missing_metrics"])
+        self.assertIn("pdo_latency", summary["missing_metrics"])
+        self.assertIn("cpu_load", summary["missing_metrics"])
+
     def test_bad_wkc_and_loss_fail(self):
         rows = [{
             "controller": "zmc432-16-v2",
@@ -79,6 +96,7 @@ class AnalyzeResultsTests(unittest.TestCase):
         }]
         summary = summarize_group(rows)
         self.assertEqual(summary["jitter_abs_us"]["max"], 10.0)
+        self.assertEqual(summary["status"], "INCOMPLETE")
 
 
 if __name__ == "__main__":
