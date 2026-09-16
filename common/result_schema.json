@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/magic-alt/plc_lab/common/result_schema.json",
+  "title": "PLC Lab EtherCAT benchmark run",
+  "type": "object",
+  "required": ["run_id", "controller", "mode", "requested_cycle_us", "status", "samples"],
+  "properties": {
+    "run_id": {"type": "string"},
+    "controller": {"enum": ["zmc432-16-v2", "ac702"]},
+    "controller_firmware": {"type": "string"},
+    "drive_model": {"type": "string", "default": "SV680N"},
+    "drive_firmware": {"type": "string"},
+    "mode": {"enum": ["CSP", "CST"]},
+    "requested_cycle_us": {"enum": [1000, 500, 250, 125]},
+    "actual_cycle_us": {"type": ["number", "null"]},
+    "axis_count": {"const": 16},
+    "status": {"enum": ["PASS", "FAIL", "INCOMPLETE", "UNSUPPORTED", "ABORTED", "NOT_RUN"]},
+    "notes": {"type": "string"},
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sample_index"],
+        "properties": {
+          "sample_index": {"type": "integer", "minimum": 0},
+          "timestamp_us": {"type": ["integer", "null"]},
+          "task_delta_us": {"type": ["number", "null"]},
+          "jitter_us": {"type": ["number", "null"]},
+          "dc_deviation_ns": {"type": ["number", "null"]},
+          "pdo_latency_us": {"type": ["number", "null"]},
+          "wkc_expected": {"type": ["integer", "null"]},
+          "wkc_actual": {"type": ["integer", "null"]},
+          "wkc_ok": {"type": ["boolean", "null"]},
+          "lost_frames": {"type": ["integer", "null"]},
+          "axis": {"type": ["integer", "null"], "minimum": 0, "maximum": 15},
+          "command_position": {"type": ["number", "null"]},
+          "actual_position": {"type": ["number", "null"]},
+          "following_error": {"type": ["number", "null"]},
+          "command_torque_pct": {"type": ["number", "null"]},
+          "actual_torque_pct": {"type": ["number", "null"]},
+          "cpu_load_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "bus_state": {"type": ["string", "null"]},
+          "axis_state": {"type": ["string", "null"]},
+          "notes": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
