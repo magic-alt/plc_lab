@@ -2,13 +2,15 @@
 
 ## Objective
 
-Compare the two controllers with the same 16-axis EtherCAT workload and report measured behavior, not brochure claims.
+Compare both controllers with the same 16-axis EtherCAT workload and report measured behavior rather than brochure claims.
 
-## DUT topology
+DUT topology:
 
-`controller -> SV680N[0] -> ... -> SV680N[15]`
+```text
+controller -> SV680N[0] -> ... -> SV680N[15]
+```
 
-Use the same drives, motors, cables, PDO layout, firmware, mechanics, limits and power supply for both controllers. Record all versions in the run manifest.
+Use the same drives, motors, ESI revision, PDO layout, cables, mechanics, limits, power supply and firmware for both controllers. Record all versions in each run manifest.
 
 ## Test matrix
 
@@ -23,110 +25,120 @@ Use the same drives, motors, cables, PDO layout, firmware, mechanics, limits and
 | CST | 250 us | 180 s | stress |
 | CST | 125 us | 180 s | stress |
 
-AC702 documentation specifies 1 ms as the typical synchronization period for the published multi-axis case. Sub-1 ms AC702 rows are exploratory stress tests: `unsupported` is a valid result and must not be converted into a failure of the device.
+AC702 documentation gives 1 ms as the published multi-axis synchronization point. Sub-1 ms AC702 rows are exploratory stress tests: `UNSUPPORTED` is a valid result and is not converted into a device failure.
 
-ZMC `SERVO_PERIOD` is the bus/system cycle in microseconds. A changed value requires controller restart. The requested value is valid only when it is accepted by the controller firmware and the full 16-axis PDO workload remains stable.
+ZMC `SERVO_PERIOD` is configured in microseconds and requires a controller restart after a change. An accepted configuration is still valid only if the complete 16-axis PDO workload remains stable.
 
 ## Workloads
 
 ### CSP
 
-All 16 axes execute the same bounded position workload with phase offsets. Default engineering profile:
+All 16 axes execute the same bounded position workload with alternating signs:
 
-- amplitude: 5 deg output-side equivalent (adapt `UNITS`/electronic gearing)
-- motion frequency: 0.5 Hz
-- phase: `axis * 22.5 deg`
-- acceleration/deceleration limited
-- 30 s warm-up, 180 s capture
+- amplitude: +/-5 deg output-side equivalent after engineering-unit scaling;
+- velocity: 20 deg/s equivalent;
+- acceleration/deceleration: 200 deg/s^2 equivalent;
+- odd/even axes move in opposite directions;
+- 30 s warm-up followed by the measurement window.
 
-The vendor motion kernel may generate interpolation internally; the comparison therefore measures controller + EtherCAT execution under equivalent motion semantics, not identical source-code instruction count.
+The two vendor motion kernels may interpolate differently internally. The benchmark therefore compares equivalent motion semantics, not identical source-instruction counts.
 
 ### CST
 
-CST is **disarmed by default**. The checked-in configuration uses 0% torque. Nonzero torque may only be enabled on a mechanically safe fixture after drive-side positive/negative torque limits and velocity limits are configured.
+CST is **disarmed and 0% torque by default**. Nonzero torque may only be enabled on a mechanically safe fixture after drive positive/negative torque and velocity limits are configured.
 
-Recommended loaded-fixture profile: +/-2% rated torque, 0.5 Hz square/triangle command, ramp >= 20 %/s, explicit velocity limit.
+Recommended first loaded profile:
+
+- +/-2% rated torque;
+- polarity reversal every 1 s;
+- odd/even axes use opposite signs;
+- STO / external emergency stop available.
+
+For AC702/InoProShop, the Inovance application guide defines `SMC_SetTorque.fTorque` in **0.1% rated-torque units**; the checked-in project exposes percent to the operator and performs the x10 conversion internally.
 
 ## Required metrics
 
-Each result row uses the common CSV schema:
+Common CSV columns:
 
-- `controller`, `firmware`, `mode`, `requested_cycle_us`, `actual_cycle_us`
-- `sample_index`, `timestamp_us`, `task_delta_us`, `jitter_us`
-- `dc_deviation_ns`
-- `wkc_expected`, `wkc_actual`, `wkc_ok`
-- `lost_frames`
-- `axis`, `command_position`, `actual_position`, `following_error`
-- `command_torque_pct`, `actual_torque_pct`
-- `cpu_load_pct`
-- `bus_state`, `axis_state`, `notes`
+- identity: `controller`, firmware versions, `mode`, `requested_cycle_us`, `actual_cycle_us`;
+- scheduling: `timestamp_us`, `task_delta_us`, `jitter_us`;
+- EtherCAT: `dc_deviation_ns`, `wkc_expected`, `wkc_actual`, `wkc_ok`, `lost_frames`;
+- latency: `pdo_latency_us`;
+- motion: command/actual position, `following_error`, command/actual torque;
+- load/state: `cpu_load_pct`, bus state, axis state and notes.
 
-If a controller does not expose a metric cyclically, leave the field empty and collect the nearest vendor diagnostic separately. Do not synthesize missing hardware values.
+A metric that the target does not expose must be left empty. Never synthesize a value from a different diagnostic.
+
+### PDO latency definition
+
+`pdo_latency_us` is optional and only valid when measured by an explicit loopback or hardware timestamp path, for example:
+
+```text
+master output PDO bit/word
+  -> EtherCAT slave / remote I/O
+  -> physical or firmware loopback
+  -> input PDO
+  -> master timestamp
+```
+
+Report round-trip latency unless the fixture provides independently timestamped one-way latency. Record the method in `notes`. **Following error is not PDO latency**, task jitter is not DC deviation, and link-loss counters are not WKC.
 
 ## Pass/fail gates
 
-A cycle/mode row is `PASS` only if all are true:
+A cycle/mode row is `PASS` only when all applicable measurements satisfy the declared gates and all 16 configured slaves remain operational. `UNSUPPORTED` is distinct from `FAIL`.
 
-1. all 16 configured slaves reach OP and stay operational;
-2. zero communication-loss events during capture;
-3. no wrong-working-counter condition (where the runtime exposes WKC);
-4. no drive fault or controller axis fault;
-5. task jitter and DC deviation stay within the test's declared limits;
-6. following-error limit is not exceeded;
-7. controller CPU/load indication remains below the declared saturation limit;
-8. the requested cycle equals the measured/active cycle.
+Default laboratory gates (not vendor guarantees):
 
-`UNSUPPORTED` is distinct from `FAIL`.
-
-## Suggested default limits
-
-These are laboratory gates, not vendor guarantees:
-
-- jitter p99 <= 10% of cycle
-- jitter max <= 25% of cycle
-- DC deviation p99 <= 5 us where measurable
-- lost frames = 0
-- bad WKC cycles = 0
-- following error: application-specific; start with <= 0.1 deg equivalent
-- CPU load p99 <= 80%
+- measured/active cycle matches the requested cycle;
+- jitter p99 <= 10% of cycle;
+- jitter max <= 25% of cycle;
+- DC deviation p99 <= 5 us where measurable;
+- lost frames = 0;
+- bad WKC samples = 0 where WKC is exposed;
+- following error <= application-specific limit (start with 0.1 deg equivalent if appropriate);
+- CPU load p99 <= 80% where exposed;
+- no drive/controller fault.
 
 ## Measurement sources
 
 ### ZMC432-16-V2
 
-- `SERVO_PERIOD`: active controller/bus period
-- `DPOS`, `MPOS`, `DRIVE_FE`, `DRIVE_TORQUE`: motion feedback
-- `NODE_STATUS`, `DRIVE_STATUS`, `AXISSTATUS`: state
-- `?*ETHERCAT`: node state and `Lostcount`
-- RTSys/ZDevelop bus-node diagnostics: 300h..309h counters, especially link-loss counters
-- `SCOPE`: cycle-synchronous capture for selected channels
+- `SERVO_PERIOD`: configured/active system-bus period;
+- `DPOS`, `MPOS`, `DRIVE_FE`, `DRIVE_TORQUE`: cyclic motion feedback;
+- `NODE_STATUS`, `DRIVE_STATUS`, `AXISSTATUS`: state;
+- `?*ETHERCAT`: node state and `Lostcount`;
+- RTSys/ZDevelop bus-node diagnostics: 300h..309h counters, especially link-loss counters;
+- SCOPE/trace export for selected cyclic channels.
+
+Do not label a ZMotion loss counter as WKC unless the firmware/runtime explicitly provides WKC semantics.
 
 ### AC702
 
-- InoProShop/CODESYS task monitor: task cycle and jitter
-- EtherCAT Master DC Statistics: DC timing deviation distribution
-- EtherCAT Master Status/Overview: LostFrameCount/RxErrorCount/TxErrorCount and slave errors
-- EtherCAT Master IEC object / last error: wrong-working-counter condition
-- PLCopen motion feedback / axis reference: following error and state
-- controller display/runtime monitor: CPU load
+- `SysTimeGetUs`: application-observed task period/jitter;
+- InoProShop/CODESYS task monitor: cycle/execution-time statistics;
+- EtherCAT Master DC Statistics: DC timing deviation;
+- EtherCAT Master status/overview: lost-frame and link/error counters;
+- EtherCAT master IEC diagnostics / last error: wrong-working-counter conditions;
+- SoftMotion axis diagnostics: actual position, tracking error and torque;
+- AC702 display/runtime monitor: CPU load.
 
 ## Run procedure
 
-1. Record controller, drive and motor firmware versions.
-2. Verify identical PDOs and DC configuration.
-3. Start with one axis at 1 ms, zero/non-moving command.
+1. Record controller, drive, ESI and motor firmware/version information.
+2. Verify identical PDOs and DC strategy.
+3. Start with one axis at 1 ms and a zero/non-moving command.
 4. Expand to 16 axes at 1 ms.
 5. Run CSP baseline.
-6. Run CST only after fixture and limits are verified.
-7. Move to shorter periods one step at a time.
-8. After any bus fault, stop, save diagnostics, power-cycle if required, and start a new run ID.
-9. Never reuse a failed run after topology/PDO/period changes.
+6. Run CST only after fixture, STO and limits are verified.
+7. Move to 500/250/125 us one step at a time.
+8. Save raw data and diagnostics before calculating summaries.
+9. After a bus fault, topology/PDO/period change or power cycle, start a new run ID.
 
 ## Fairness rules
 
-- Same drive firmware and EtherCAT XML/ESI revision.
-- Same PDO byte count and ordering where possible.
-- Same DC reference strategy.
-- Same cable chain and cable lengths.
+- Same drive firmware and ESI revision.
+- Same PDO byte count/order where both stacks permit it.
+- Same DC-reference strategy where configurable.
+- Same cable chain and lengths.
 - No HMI/OPC UA/database traffic during baseline runs; add a separate `loaded-runtime` profile later.
-- Store raw data before calculating summary statistics.
+- Never edit raw captures after collection; transform them into the common CSV in a separate step.
