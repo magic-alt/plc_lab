@@ -15,13 +15,13 @@ VAR
     udiCstTicks : UDINT := 0;
     udiTicksPerHalfPeriod : UDINT := 1000;
     uiStopTicks : UINT := 0;
-    lrSignedTorqueNm : LREAL;
+    lrSignedTorquePct : LREAL;
     lrAbsJitterUs : LREAL;
 END_VAR
 
 // -----------------------------------------------------------------------------
 // Task timing. Put this POU in the same high-priority cyclic task as EtherCAT
-// motion. SysTimeGetUs() is independent of the configured nominal task period.
+// motion. SysTimeGetUs() returns a monotonic microsecond tick.
 // -----------------------------------------------------------------------------
 SysTimeGetUs(stNowUs);
 GVL_Benchmark.g_uliNowUs := stNowUs;
@@ -46,8 +46,9 @@ IF GVL_Benchmark.g_xStop THEN
 END_IF
 
 // -----------------------------------------------------------------------------
-// State command generation. Axis function blocks are called after this section.
-// ----------------------------------------------------------------------------
+// Generate commands for this scan. Physical power and non-zero CST remain
+// impossible until the explicit arm variables are set by the operator.
+// -----------------------------------------------------------------------------
 CASE GVL_Benchmark.g_eState OF
     E_BenchState.IDLE:
         GVL_Benchmark.g_xRunComplete := FALSE;
@@ -111,33 +112,40 @@ CASE GVL_Benchmark.g_eState OF
     E_BenchState.RUN_CST_A:
         xEnablePower := TRUE;
         xTorqueEnable := GVL_Benchmark.g_xArmCST;
-        lrSignedTorqueNm := (GVL_Benchmark.g_lrCstCommandPct * 0.01) * GVL_Benchmark.g_lrRatedMotorTorqueNm;
+        lrSignedTorquePct := GVL_Benchmark.g_lrCstCommandPct;
         FOR uiAxis := 0 TO 15 DO
             IF (uiAxis MOD 2) = 0 THEN
-                GVL_Benchmark.g_alrCommandTorqueNm[uiAxis] := lrSignedTorqueNm;
+                GVL_Benchmark.g_alrCommandTorquePct[uiAxis] := lrSignedTorquePct;
             ELSE
-                GVL_Benchmark.g_alrCommandTorqueNm[uiAxis] := -lrSignedTorqueNm;
+                GVL_Benchmark.g_alrCommandTorquePct[uiAxis] := -lrSignedTorquePct;
             END_IF
         END_FOR
 
     E_BenchState.RUN_CST_B:
         xEnablePower := TRUE;
         xTorqueEnable := GVL_Benchmark.g_xArmCST;
-        lrSignedTorqueNm := (GVL_Benchmark.g_lrCstCommandPct * 0.01) * GVL_Benchmark.g_lrRatedMotorTorqueNm;
+        lrSignedTorquePct := GVL_Benchmark.g_lrCstCommandPct;
         FOR uiAxis := 0 TO 15 DO
             IF (uiAxis MOD 2) = 0 THEN
-                GVL_Benchmark.g_alrCommandTorqueNm[uiAxis] := -lrSignedTorqueNm;
+                GVL_Benchmark.g_alrCommandTorquePct[uiAxis] := -lrSignedTorquePct;
             ELSE
-                GVL_Benchmark.g_alrCommandTorqueNm[uiAxis] := lrSignedTorqueNm;
+                GVL_Benchmark.g_alrCommandTorquePct[uiAxis] := lrSignedTorquePct;
             END_IF
         END_FOR
 
     E_BenchState.STOPPING:
-        // Calling FB_BenchAxis with power/torque FALSE produces zero torque and
-        // drops the power/quick-stop requests. Drive-side safety remains primary.
+        // First command 0% while still powered, then remove power after two task
+        // scans. Drive-side limits / STO remain the primary safety mechanisms.
         FOR uiAxis := 0 TO 15 DO
-            GVL_Benchmark.g_alrCommandTorqueNm[uiAxis] := 0.0;
+            GVL_Benchmark.g_alrCommandTorquePct[uiAxis] := 0.0;
         END_FOR
+        IF uiStopTicks < 2 THEN
+            xEnablePower := GVL_Benchmark.g_xArmPower;
+            xTorqueEnable := (GVL_Benchmark.g_eMode = E_BenchMode.CST) AND GVL_Benchmark.g_xArmCST;
+        ELSE
+            xEnablePower := FALSE;
+            xTorqueEnable := FALSE;
+        END_IF
         uiStopTicks := uiStopTicks + 1;
 
     E_BenchState.DONE:
@@ -145,29 +153,28 @@ CASE GVL_Benchmark.g_eState OF
 
     E_BenchState.ERROR:
         GVL_Benchmark.g_xRunError := TRUE;
-
 END_CASE
 
 // -----------------------------------------------------------------------------
-// Axis bindings. Name the 16 scanned InoProShop axis objects Axis_00..Axis_15,
-// or edit only these calls to match the generated device-tree names.
+// Axis bindings. Name scanned InoProShop axis objects Axis_00..Axis_15, or edit
+// only these calls to match the generated device-tree identifiers.
 // -----------------------------------------------------------------------------
-fbAxis[0](Axis := Axis_00, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[0], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[0]);
-fbAxis[1](Axis := Axis_01, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[1], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[1]);
-fbAxis[2](Axis := Axis_02, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[2], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[2]);
-fbAxis[3](Axis := Axis_03, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[3], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[3]);
-fbAxis[4](Axis := Axis_04, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[4], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[4]);
-fbAxis[5](Axis := Axis_05, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[5], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[5]);
-fbAxis[6](Axis := Axis_06, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[6], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[6]);
-fbAxis[7](Axis := Axis_07, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[7], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[7]);
-fbAxis[8](Axis := Axis_08, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[8], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[8]);
-fbAxis[9](Axis := Axis_09, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[9], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[9]);
-fbAxis[10](Axis := Axis_10, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[10], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[10]);
-fbAxis[11](Axis := Axis_11, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[11], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[11]);
-fbAxis[12](Axis := Axis_12, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[12], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[12]);
-fbAxis[13](Axis := Axis_13, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[13], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[13]);
-fbAxis[14](Axis := Axis_14, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[14], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[14]);
-fbAxis[15](Axis := Axis_15, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[15], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorqueNm := GVL_Benchmark.g_alrCommandTorqueNm[15]);
+fbAxis[0](Axis := Axis_00, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[0], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[0]);
+fbAxis[1](Axis := Axis_01, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[1], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[1]);
+fbAxis[2](Axis := Axis_02, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[2], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[2]);
+fbAxis[3](Axis := Axis_03, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[3], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[3]);
+fbAxis[4](Axis := Axis_04, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[4], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[4]);
+fbAxis[5](Axis := Axis_05, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[5], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[5]);
+fbAxis[6](Axis := Axis_06, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[6], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[6]);
+fbAxis[7](Axis := Axis_07, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[7], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[7]);
+fbAxis[8](Axis := Axis_08, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[8], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[8]);
+fbAxis[9](Axis := Axis_09, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[9], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[9]);
+fbAxis[10](Axis := Axis_10, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[10], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[10]);
+fbAxis[11](Axis := Axis_11, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[11], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[11]);
+fbAxis[12](Axis := Axis_12, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[12], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[12]);
+fbAxis[13](Axis := Axis_13, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[13], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[13]);
+fbAxis[14](Axis := Axis_14, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[14], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[14]);
+fbAxis[15](Axis := Axis_15, xEnablePower := xEnablePower, eMode := GVL_Benchmark.g_eMode, xMoveExecute := xMovePulse, lrTargetPosition := GVL_Benchmark.g_alrTargetPosition[15], lrVelocity := GVL_Benchmark.g_lrVelocity, lrAcceleration := GVL_Benchmark.g_lrAcceleration, lrDeceleration := GVL_Benchmark.g_lrDeceleration, lrJerk := GVL_Benchmark.g_lrJerk, xTorqueEnable := xTorqueEnable, lrTorquePct := GVL_Benchmark.g_alrCommandTorquePct[15]);
 
 // Collect per-axis telemetry and state for Trace/export.
 xAllPowerReady := TRUE;
@@ -177,7 +184,7 @@ xAnyAxisError := FALSE;
 FOR uiAxis := 0 TO 15 DO
     GVL_Benchmark.g_alrActualPosition[uiAxis] := fbAxis[uiAxis].lrActualPosition;
     GVL_Benchmark.g_alrTrackingError[uiAxis] := fbAxis[uiAxis].lrTrackingError;
-    GVL_Benchmark.g_alrActualTorqueNm[uiAxis] := fbAxis[uiAxis].lrActualTorqueNm;
+    GVL_Benchmark.g_alrActualTorquePct[uiAxis] := fbAxis[uiAxis].lrActualTorquePct;
     GVL_Benchmark.g_axAxisPowerReady[uiAxis] := fbAxis[uiAxis].xPowerReady;
     GVL_Benchmark.g_axAxisModeReady[uiAxis] := fbAxis[uiAxis].xModeReady;
     GVL_Benchmark.g_axAxisCommandDone[uiAxis] := fbAxis[uiAxis].xCommandDone;
@@ -195,7 +202,7 @@ IF xAnyAxisError AND (GVL_Benchmark.g_eState <> E_BenchState.STOPPING) THEN
 END_IF
 
 // -----------------------------------------------------------------------------
-// State transitions use outputs from this task cycle.
+// State transitions use outputs from this scan.
 // -----------------------------------------------------------------------------
 CASE GVL_Benchmark.g_eState OF
     E_BenchState.ENABLE_AXES:
@@ -228,6 +235,8 @@ CASE GVL_Benchmark.g_eState OF
 
     E_BenchState.RUN_CST_A, E_BenchState.RUN_CST_B:
         IF GVL_Benchmark.g_udiRequestedCycleUs > 0 THEN
+            // One second per torque polarity. This is an integer number of task
+            // cycles for all four benchmark periods.
             udiTicksPerHalfPeriod := 1000000 / GVL_Benchmark.g_udiRequestedCycleUs;
             IF udiTicksPerHalfPeriod = 0 THEN
                 udiTicksPerHalfPeriod := 1;
