@@ -1,0 +1,1 @@
+controller,controller_firmware,drive_model,drive_firmware,mode,requested_cycle_us,actual_cycle_us,status,sample_index,timestamp_us,task_delta_us,jitter_us,dc_deviation_ns,pdo_latency_us,wkc_expected,wkc_actual,wkc_ok,lost_frames,axis,command_position,actual_position,following_error,command_torque_pct,actual_torque_pct,cpu_load_pct,bus_state,axis_state,notes
