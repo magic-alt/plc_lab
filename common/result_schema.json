@@ -27,6 +27,7 @@
           "task_delta_us": {"type": ["number", "null"]},
           "jitter_us": {"type": ["number", "null"]},
           "dc_deviation_ns": {"type": ["number", "null"]},
+          "pdo_latency_us": {"type": ["number", "null"]},
           "wkc_expected": {"type": ["integer", "null"]},
           "wkc_actual": {"type": ["integer", "null"]},
           "wkc_ok": {"type": ["boolean", "null"]},
