@@ -14,7 +14,7 @@
     "requested_cycle_us": {"enum": [1000, 500, 250, 125]},
     "actual_cycle_us": {"type": ["number", "null"]},
     "axis_count": {"const": 16},
-    "status": {"enum": ["PASS", "FAIL", "UNSUPPORTED", "ABORTED", "NOT_RUN"]},
+    "status": {"enum": ["PASS", "FAIL", "INCOMPLETE", "UNSUPPORTED", "ABORTED", "NOT_RUN"]},
     "notes": {"type": "string"},
     "samples": {
       "type": "array",
